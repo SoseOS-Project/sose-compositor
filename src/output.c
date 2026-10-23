@@ -1,41 +1,18 @@
 // the screen: setting it up, its size, and drawing every frame
 
 #include "server.h"
-#include <stdbool.h>
-#include <wayland-util.h>
 
 static void output_frame(struct wl_listener *listener, void *data) {
 	/* This function is called every time an output is ready to display a frame,
 	 * generally at the output's refresh rate (e.g. 60Hz). */
-	struct tinywl_output *output = wl_container_of(listener, output, frame);
+	struct sose_output *output = wl_container_of(listener, output, frame);
 	struct wlr_scene *scene = output->server->scene;
 
 	struct wlr_scene_output *scene_output = wlr_scene_get_scene_output(
 		scene, output->wlr_output);
 
-
-	/* slide opening apps up. 300 ms, fast at first and gentle at the end */
-	bool animating = false;
-	struct tinywl_toplevel *toplevel;
-	wl_list_for_each(toplevel, &output->server->toplevels, link)  {
-		if (!toplevel->opening) {
-			continue;
-		}
-
-		/* how far along it is, 0 to 1 */
-		double t = (now_ms() - toplevel->open_start) / 300.0;
-		if (t >= 1.0) {
-			t = 1.0;
-			toplevel->opening = false;
-		} else {
-			animating = true;
-		}
-
-		/* ease out: starts fast, slows down at the end */
-		double eased = 1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t);
-		int y = (int)((1.0 - eased) * output->wlr_output->height);
-		wlr_scene_node_set_position(&toplevel->scene_tree->node, 0, y);
-	}
+	/* move everything that's animating one step, see animate.c */
+	bool animating = animate_step(output->server);
 
 	/* Render the scene if needed and commit the output */
 	wlr_scene_output_commit(scene_output, NULL);
@@ -53,13 +30,13 @@ static void output_request_state(struct wl_listener *listener, void *data) {
 	/* This function is called when the backend requests a new state for
 	 * the output. For example, Wayland and X11 backends request a new mode
 	 * when the output window is resized. */
-	struct tinywl_output *output = wl_container_of(listener, output, request_state);
+	struct sose_output *output = wl_container_of(listener, output, request_state);
 	const struct wlr_output_event_request_state *event = data;
 	wlr_output_commit_state(output->wlr_output, event->state);
 }
 
 static void output_destroy(struct wl_listener *listener, void *data) {
-	struct tinywl_output *output = wl_container_of(listener, output, destroy);
+	struct sose_output *output = wl_container_of(listener, output, destroy);
 
 	wl_list_remove(&output->frame.link);
 	wl_list_remove(&output->request_state.link);
@@ -71,7 +48,7 @@ static void output_destroy(struct wl_listener *listener, void *data) {
 void server_new_output(struct wl_listener *listener, void *data) {
 	/* This event is raised by the backend when a new output (aka a display or
 	 * monitor) becomes available. */
-	struct tinywl_server *server =
+	struct sose_server *server =
 		wl_container_of(listener, server, new_output);
 	struct wlr_output *wlr_output = data;
 
@@ -103,7 +80,7 @@ void server_new_output(struct wl_listener *listener, void *data) {
 	wlr_output_state_finish(&state);
 
 	/* Allocates and configures our state for this output */
-	struct tinywl_output *output = calloc(1, sizeof(*output));
+	struct sose_output *output = calloc(1, sizeof(*output));
 	output->wlr_output = wlr_output;
 	output->server = server;
 

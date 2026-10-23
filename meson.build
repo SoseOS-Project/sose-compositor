@@ -31,6 +31,9 @@ sources = files(
   'src/output.c',
   'src/input.c',
   'src/keybindings.c',
+  'src/animate.c',
+  'src/gestures.c',
+  'src/lock.c',
 )
 
 executable('sose-compositor', sources, dependencies: deps, install: true)

@@ -8,12 +8,25 @@ double now_ms(void) {
 	return ts.tv_sec * 1000.0 + ts.tv_nsec / 1000000.0;
 }
 
-void focus_toplevel(struct tinywl_toplevel *toplevel) {
+/* how tall the screen is, in pixels */
+int screen_height(struct sose_server *server) {
+	struct wlr_box box;
+	wlr_output_layout_get_box(server->output_layout, NULL, &box);
+	return box.height;
+}
+
+void focus_toplevel(struct sose_toplevel *toplevel) {
 	/* Note: this function only deals with keyboard focus. */
 	if (toplevel == NULL) {
 		return;
 	}
-	struct tinywl_server *server = toplevel->server;
+	/* coming back from home: turn it back on and slide it up like a fresh open */
+	if (toplevel->hidden) {
+		toplevel->hidden = false;
+		wlr_scene_node_set_enabled(&toplevel->scene_tree->node, true);
+		slide_toplevel(toplevel, screen_height(toplevel->server), 0, false);
+	}
+	struct sose_server *server = toplevel->server;
 	struct wlr_seat *seat = server->seat;
 	struct wlr_surface *prev_surface = seat->keyboard_state.focused_surface;
 	struct wlr_surface *surface = toplevel->xdg_toplevel->base->surface;
@@ -53,23 +66,28 @@ void focus_toplevel(struct tinywl_toplevel *toplevel) {
 
 static void xdg_toplevel_map(struct wl_listener *listener, void *data) {
 	/* Called when the surface is mapped, or ready to display on-screen. */
-	struct tinywl_toplevel *toplevel = wl_container_of(listener, toplevel, map);
+	struct sose_toplevel *toplevel = wl_container_of(listener, toplevel, map);
 
 	wl_list_insert(&toplevel->server->toplevels, &toplevel->link);
 
-	toplevel->opening = true;
-	toplevel->open_start = now_ms();
+	/* open animation: slide up from below the screen */
+	slide_toplevel(toplevel, screen_height(toplevel->server), 0, false);
 
 	focus_toplevel(toplevel);
 }
 
 static void xdg_toplevel_unmap(struct wl_listener *listener, void *data) {
 	/* Called when the surface is unmapped, and should no longer be shown. */
-	struct tinywl_toplevel *toplevel = wl_container_of(listener, toplevel, unmap);
+	struct sose_toplevel *toplevel = wl_container_of(listener, toplevel, unmap);
 
 	/* Reset the cursor mode if the grabbed toplevel was unmapped. */
 	if (toplevel == toplevel->server->grabbed_toplevel) {
 		reset_cursor_mode(toplevel->server);
+	}
+
+	/* close animation, unless it was already off screen at home */
+	if (!toplevel->hidden) {
+		animate_close(toplevel);
 	}
 
 	wl_list_remove(&toplevel->link);
@@ -77,7 +95,7 @@ static void xdg_toplevel_unmap(struct wl_listener *listener, void *data) {
 
 static void xdg_toplevel_commit(struct wl_listener *listener, void *data) {
 	/* Called when a new surface state is committed. */
-	struct tinywl_toplevel *toplevel = wl_container_of(listener, toplevel, commit);
+	struct sose_toplevel *toplevel = wl_container_of(listener, toplevel, commit);
 
 	if (toplevel->xdg_toplevel->base->initial_commit) {
 		/* When an xdg_surface performs an initial commit, the compositor must
@@ -104,7 +122,7 @@ static void xdg_toplevel_commit(struct wl_listener *listener, void *data) {
 
 static void xdg_toplevel_destroy(struct wl_listener *listener, void *data) {
 	/* Called when the xdg_toplevel is destroyed. */
-	struct tinywl_toplevel *toplevel = wl_container_of(listener, toplevel, destroy);
+	struct sose_toplevel *toplevel = wl_container_of(listener, toplevel, destroy);
 
 	wl_list_remove(&toplevel->map.link);
 	wl_list_remove(&toplevel->unmap.link);
@@ -142,12 +160,12 @@ static void xdg_toplevel_request_maximize(
 		struct wl_listener *listener, void *data) {
 	/* This event is raised when a client would like to maximize itself,
 	 * typically because the user clicked on the maximize button on client-side
-	 * decorations. tinywl doesn't support maximization, but to conform to
+	 * decorations. we don't support maximization, but to conform to
 	 * xdg-shell protocol we still must send a configure.
 	 * wlr_xdg_surface_schedule_configure() is used to send an empty reply.
 	 * However, if the request was sent before an initial commit, we don't do
 	 * anything and let the client finish the initial surface setup. */
-	struct tinywl_toplevel *toplevel =
+	struct sose_toplevel *toplevel =
 		wl_container_of(listener, toplevel, request_maximize);
 	if (toplevel->xdg_toplevel->base->initialized) {
 		wlr_xdg_surface_schedule_configure(toplevel->xdg_toplevel->base);
@@ -157,7 +175,7 @@ static void xdg_toplevel_request_maximize(
 static void xdg_toplevel_request_fullscreen(
 		struct wl_listener *listener, void *data) {
 	/* Just as with request_maximize, we must send a configure here. */
-	struct tinywl_toplevel *toplevel =
+	struct sose_toplevel *toplevel =
 		wl_container_of(listener, toplevel, request_fullscreen);
 	if (toplevel->xdg_toplevel->base->initialized) {
 		wlr_xdg_surface_schedule_configure(toplevel->xdg_toplevel->base);
@@ -166,11 +184,11 @@ static void xdg_toplevel_request_fullscreen(
 
 void server_new_xdg_toplevel(struct wl_listener *listener, void *data) {
 	/* This event is raised when a client creates a new toplevel (application window). */
-	struct tinywl_server *server = wl_container_of(listener, server, new_xdg_toplevel);
+	struct sose_server *server = wl_container_of(listener, server, new_xdg_toplevel);
 	struct wlr_xdg_toplevel *xdg_toplevel = data;
 
-	/* Allocate a tinywl_toplevel for this surface */
-	struct tinywl_toplevel *toplevel = calloc(1, sizeof(*toplevel));
+	/* Allocate a sose_toplevel for this surface */
+	struct sose_toplevel *toplevel = calloc(1, sizeof(*toplevel));
 	toplevel->server = server;
 	toplevel->xdg_toplevel = xdg_toplevel;
 	toplevel->scene_tree =

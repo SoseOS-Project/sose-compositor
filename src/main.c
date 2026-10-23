@@ -1,9 +1,15 @@
 // sose-compositor: the soseos wayland compositor, for phones.
 // started as tinywl from wlroots 0.20.2 (CC0, public domain).
 // this file only starts everything up, the rest is split by job:
-//   toplevel.c     app windows    popup.c        menus and popups
-//   decoration.c   title bars     output.c       the screen, every frame
-//   input.c        keyboard and mouse     keybindings.c  shortcuts
+//   toplevel.c     app windows: open, close, size, focus, border
+//   animate.c      sliding windows (open, home, close)
+//   gestures.c     swipe up from the bottom to go home
+//   output.c       the screen, every frame
+//   input.c        keyboard and mouse
+//   keybindings.c  shortcuts
+//   decoration.c   no title bars
+//   popup.c        menus and popups
+//   server.h       the shared structs
 
 #include "server.h"
 
@@ -27,7 +33,7 @@ int main(int argc, char *argv[]) {
 		return 0;
 	}
 
-	struct tinywl_server server = {0};
+	struct sose_server server = {0};
 	/* The Wayland display is managed by libwayland. It handles accepting
 	 * clients from the Unix socket, managing Wayland globals, and so on. */
 	server.wl_display = wl_display_create();
@@ -104,6 +110,7 @@ int main(int argc, char *argv[]) {
 	 * https://drewdevault.com/2018/07/29/Wayland-shells.html.
 	 */
 	wl_list_init(&server.toplevels);
+	wl_list_init(&server.closing);
 	server.xdg_shell = wlr_xdg_shell_create(server.wl_display, 3);
 	server.new_xdg_toplevel.notify = server_new_xdg_toplevel;
 	wl_signal_add(&server.xdg_shell->events.new_toplevel, &server.new_xdg_toplevel);
@@ -133,7 +140,7 @@ int main(int argc, char *argv[]) {
 	 *
 	 * And more comments are sprinkled throughout the notify functions above.
 	 */
-	server.cursor_mode = TINYWL_CURSOR_PASSTHROUGH;
+	server.cursor_mode = SOSE_CURSOR_PASSTHROUGH;
 	server.cursor_motion.notify = server_cursor_motion;
 	wl_signal_add(&server.cursor->events.motion, &server.cursor_motion);
 	server.cursor_motion_absolute.notify = server_cursor_motion_absolute;
