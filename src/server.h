@@ -111,6 +111,9 @@ struct tinywl_toplevel {
 	/* the app's decoration object, NULL if it never asked about decorations */
 	struct wlr_xdg_toplevel_decoration_v1 *decoration;
 	struct wl_listener decoration_destroy;
+
+	bool opening;
+	double open_start;
 };
 
 struct tinywl_popup {
@@ -130,6 +133,7 @@ struct tinywl_keyboard {
 };
 
 /* toplevel.c */
+double now_ms(void);
 void focus_toplevel(struct tinywl_toplevel *toplevel);
 void server_new_xdg_toplevel(struct wl_listener *listener, void *data);
 

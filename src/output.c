@@ -1,6 +1,8 @@
 // the screen: setting it up, its size, and drawing every frame
 
 #include "server.h"
+#include <stdbool.h>
+#include <wayland-util.h>
 
 static void output_frame(struct wl_listener *listener, void *data) {
 	/* This function is called every time an output is ready to display a frame,
@@ -11,12 +13,40 @@ static void output_frame(struct wl_listener *listener, void *data) {
 	struct wlr_scene_output *scene_output = wlr_scene_get_scene_output(
 		scene, output->wlr_output);
 
+
+	/* slide opening apps up. 300 ms, fast at first and gentle at the end */
+	bool animating = false;
+	struct tinywl_toplevel *toplevel;
+	wl_list_for_each(toplevel, &output->server->toplevels, link)  {
+		if (!toplevel->opening) {
+			continue;
+		}
+
+		/* how far along it is, 0 to 1 */
+		double t = (now_ms() - toplevel->open_start) / 300.0;
+		if (t >= 1.0) {
+			t = 1.0;
+			toplevel->opening = false;
+		} else {
+			animating = true;
+		}
+
+		/* ease out: starts fast, slows down at the end */
+		double eased = 1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t);
+		int y = (int)((1.0 - eased) * output->wlr_output->height);
+		wlr_scene_node_set_position(&toplevel->scene_tree->node, 0, y);
+	}
+
 	/* Render the scene if needed and commit the output */
 	wlr_scene_output_commit(scene_output, NULL);
 
 	struct timespec now;
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	wlr_scene_output_send_frame_done(scene_output, &now);
+	/* keep drawing frames while something is still moving */
+	if (animating) {
+		wlr_output_schedule_frame(output->wlr_output);
+	}
 }
 
 static void output_request_state(struct wl_listener *listener, void *data) {

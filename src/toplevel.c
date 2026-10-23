@@ -2,6 +2,12 @@
 
 #include "server.h"
 
+double now_ms(void) {
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return ts.tv_sec * 1000.0 + ts.tv_nsec / 1000000.0;
+}
+
 void focus_toplevel(struct tinywl_toplevel *toplevel) {
 	/* Note: this function only deals with keyboard focus. */
 	if (toplevel == NULL) {
@@ -50,6 +56,9 @@ static void xdg_toplevel_map(struct wl_listener *listener, void *data) {
 	struct tinywl_toplevel *toplevel = wl_container_of(listener, toplevel, map);
 
 	wl_list_insert(&toplevel->server->toplevels, &toplevel->link);
+
+	toplevel->opening = true;
+	toplevel->open_start = now_ms();
 
 	focus_toplevel(toplevel);
 }
