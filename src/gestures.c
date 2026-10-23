@@ -11,8 +11,9 @@
  * as a share of the screen height */
 #define HOME_DISTANCE 0.15
 
-/* the app you're looking at: the frontmost one that isn't at home */
-static struct sose_toplevel *top_app(struct sose_server *server) {
+/* the app you're looking at: the frontmost one that isn't at home.
+ * NULL when nothing is on screen */
+struct sose_toplevel *top_app(struct sose_server *server) {
 	struct sose_toplevel *toplevel;
 	wl_list_for_each(toplevel, &server->toplevels, link) {
 		if (!toplevel->hidden) {

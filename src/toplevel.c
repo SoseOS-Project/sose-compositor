@@ -85,12 +85,22 @@ static void xdg_toplevel_unmap(struct wl_listener *listener, void *data) {
 		reset_cursor_mode(toplevel->server);
 	}
 
+	struct sose_server *server = toplevel->server;
+
 	/* close animation, unless it was already off screen at home */
 	if (!toplevel->hidden) {
 		animate_close(toplevel);
+
+		/* a swipe on this app can't go on without it, or it would drag
+		 * whatever app is underneath */
+		server->swiping_home = false;
 	}
 
 	wl_list_remove(&toplevel->link);
+
+	/* the app underneath is on screen now, give it the keyboard. otherwise
+	 * typing goes nowhere until you click it */
+	focus_toplevel(top_app(server));
 }
 
 static void xdg_toplevel_commit(struct wl_listener *listener, void *data) {

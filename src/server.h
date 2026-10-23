@@ -180,6 +180,7 @@ bool gesture_press(struct sose_server *server);
 bool gesture_motion(struct sose_server *server);
 bool gesture_release(struct sose_server *server);
 void go_home(struct sose_server *server);
+struct sose_toplevel *top_app(struct sose_server *server);
 
 /* popup.c */
 void server_new_xdg_popup(struct wl_listener *listener, void *data);
@@ -191,6 +192,7 @@ void server_new_decoration(struct wl_listener *listener, void *data);
 void server_new_output(struct wl_listener *listener, void *data);
 
 /* keybindings.c */
+void spawn(const char *cmd);
 bool handle_keybinding(struct sose_server *server, xkb_keysym_t sym);
 
 /* input.c */

@@ -19,4 +19,11 @@ void server_new_decoration(struct wl_listener *listener, void *data) {
 	toplevel->decoration = decoration;
 	toplevel->decoration_destroy.notify = decoration_destroy;
 	wl_signal_add(&decoration->events.destroy, &toplevel->decoration_destroy);
+
+	/* most apps ask before their first commit, but if this one asked later
+	 * the first commit is over already, so answer now */
+	if (decoration->toplevel->base->initialized) {
+		wlr_xdg_toplevel_decoration_v1_set_mode(decoration,
+			WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+	}
 }
