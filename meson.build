@@ -23,4 +23,14 @@ deps = [
   dependency('xkbcommon'),
 ]
 
-executable('sose-compositor', 'src/main.c', dependencies: deps, install: true)
+sources = files(
+  'src/main.c',
+  'src/toplevel.c',
+  'src/popup.c',
+  'src/decoration.c',
+  'src/output.c',
+  'src/input.c',
+  'src/keybindings.c',
+)
+
+executable('sose-compositor', sources, dependencies: deps, install: true)
