@@ -24,6 +24,7 @@
 #include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_subcompositor.h>
 #include <wlr/types/wlr_xcursor_manager.h>
+#include <wlr/types/wlr_xdg_decoration_v1.h>
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/log.h>
 #include <xkbcommon/xkbcommon.h>
@@ -46,6 +47,11 @@ struct tinywl_server {
 	struct wlr_xdg_shell *xdg_shell;
 	struct wl_listener new_xdg_toplevel;
 	struct wl_listener new_xdg_popup;
+
+	/* lets apps know the compositor handles decorations, so they skip their title bar */
+	struct wlr_xdg_decoration_manager_v1 *decoration_manager;
+	struct wl_listener new_decoration;
+
 	struct wl_list toplevels;
 
 	struct wlr_cursor *cursor;
@@ -95,6 +101,13 @@ struct tinywl_toplevel {
 	struct wl_listener request_resize;
 	struct wl_listener request_maximize;
 	struct wl_listener request_fullscreen;
+
+	/* colored frame behind the window, later the color of the vm it's from */
+	struct wlr_scene_rect *border;
+
+	/* the app's decoration object, NULL if it never asked about decorations */
+	struct wlr_xdg_toplevel_decoration_v1 *decoration;
+	struct wl_listener decoration_destroy;
 };
 
 struct tinywl_popup {
@@ -194,6 +207,13 @@ static bool handle_keybinding(struct tinywl_server *server, xkb_keysym_t sym) {
 		struct tinywl_toplevel *next_toplevel =
 			wl_container_of(server->toplevels.prev, next_toplevel, link);
 		focus_toplevel(next_toplevel);
+		break;
+	case XKB_KEY_Return:
+		/* alt+enter: open a terminal. the forked copy turns into foot,
+		 * the compositor itself keeps running */
+		if (fork() == 0) {
+			execl("/bin/sh", "/bin/sh", "-c", "foot", (void *)NULL);
+		}
 		break;
 	default:
 		return false;
@@ -633,6 +653,10 @@ static void server_new_output(struct wl_listener *listener, void *data) {
 	struct wlr_output_mode *mode = wlr_output_preferred_mode(wlr_output);
 	if (mode != NULL) {
 		wlr_output_state_set_mode(&state, mode);
+	} else {
+		/* no modes means we're a window inside another compositor (testing on
+		 * the pc), so make it phone shaped. a real screen always has modes */
+		wlr_output_state_set_custom_mode(&state, 400, 860, 0);
 	}
 
 	/* Atomically applies the new output state. */
@@ -700,11 +724,25 @@ static void xdg_toplevel_commit(struct wl_listener *listener, void *data) {
 
 	if (toplevel->xdg_toplevel->base->initial_commit) {
 		/* When an xdg_surface performs an initial commit, the compositor must
-		 * reply with a configure so the client can map the surface. tinywl
-		 * configures the xdg_toplevel with 0,0 size to let the client pick the
-		 * dimensions itself. */
-		wlr_xdg_toplevel_set_size(toplevel->xdg_toplevel, 0, 0);
+		 * reply with a configure so the client can map the surface.
+		 * phone: every app is the size of the whole screen. */
+		struct wlr_box screen;
+		wlr_output_layout_get_box(toplevel->server->output_layout, NULL, &screen);
+		wlr_xdg_toplevel_set_size(toplevel->xdg_toplevel, screen.width, screen.height);
+
+		/* "server side" = the compositor draws decorations. it draws none,
+		 * so the app has no title bar. can only be sent once the window is
+		 * set up, which is this first commit */
+		if (toplevel->decoration) {
+			wlr_xdg_toplevel_decoration_v1_set_mode(toplevel->decoration,
+				WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+		}
 	}
+
+	/* runs on every commit, so the border follows the window's size.
+	 * 2 pixels bigger on each side */
+	struct wlr_box geo = toplevel->xdg_toplevel->base->geometry;
+	wlr_scene_rect_set_size(toplevel->border, geo.width + 4, geo.height + 4);
 }
 
 static void xdg_toplevel_destroy(struct wl_listener *listener, void *data) {
@@ -720,61 +758,27 @@ static void xdg_toplevel_destroy(struct wl_listener *listener, void *data) {
 	wl_list_remove(&toplevel->request_maximize.link);
 	wl_list_remove(&toplevel->request_fullscreen.link);
 
-	free(toplevel);
-}
-
-static void begin_interactive(struct tinywl_toplevel *toplevel,
-		enum tinywl_cursor_mode mode, uint32_t edges) {
-	/* This function sets up an interactive move or resize operation, where the
-	 * compositor stops propagating pointer events to clients and instead
-	 * consumes them itself, to move or resize windows. */
-	struct tinywl_server *server = toplevel->server;
-
-	server->grabbed_toplevel = toplevel;
-	server->cursor_mode = mode;
-
-	if (mode == TINYWL_CURSOR_MOVE) {
-		server->grab_x = server->cursor->x - toplevel->scene_tree->node.x;
-		server->grab_y = server->cursor->y - toplevel->scene_tree->node.y;
-	} else {
-		struct wlr_box *geo_box = &toplevel->xdg_toplevel->base->geometry;
-
-		double border_x = (toplevel->scene_tree->node.x + geo_box->x) +
-			((edges & WLR_EDGE_RIGHT) ? geo_box->width : 0);
-		double border_y = (toplevel->scene_tree->node.y + geo_box->y) +
-			((edges & WLR_EDGE_BOTTOM) ? geo_box->height : 0);
-		server->grab_x = server->cursor->x - border_x;
-		server->grab_y = server->cursor->y - border_y;
-
-		server->grab_geobox = *geo_box;
-		server->grab_geobox.x += toplevel->scene_tree->node.x;
-		server->grab_geobox.y += toplevel->scene_tree->node.y;
-
-		server->resize_edges = edges;
+	/* stop listening before the memory is freed, or wlroots could call
+	 * into it later */
+	if (toplevel->decoration) {
+		wl_list_remove(&toplevel->decoration_destroy.link);
 	}
+
+	free(toplevel);
 }
 
 static void xdg_toplevel_request_move(
 		struct wl_listener *listener, void *data) {
 	/* This event is raised when a client would like to begin an interactive
-	 * move, typically because the user clicked on their client-side
-	 * decorations. Note that a more sophisticated compositor should check the
-	 * provided serial against a list of button press serials sent to this
-	 * client, to prevent the client from requesting this whenever they want. */
-	struct tinywl_toplevel *toplevel = wl_container_of(listener, toplevel, request_move);
-	begin_interactive(toplevel, TINYWL_CURSOR_MOVE, 0);
+	 * move, typically because the user dragged its title bar.
+	 * phone: apps stay where they are, so this is ignored. */
 }
 
 static void xdg_toplevel_request_resize(
 		struct wl_listener *listener, void *data) {
 	/* This event is raised when a client would like to begin an interactive
-	 * resize, typically because the user clicked on their client-side
-	 * decorations. Note that a more sophisticated compositor should check the
-	 * provided serial against a list of button press serials sent to this
-	 * client, to prevent the client from requesting this whenever they want. */
-	struct wlr_xdg_toplevel_resize_event *event = data;
-	struct tinywl_toplevel *toplevel = wl_container_of(listener, toplevel, request_resize);
-	begin_interactive(toplevel, TINYWL_CURSOR_RESIZE, event->edges);
+	 * resize, typically because the user dragged its edge.
+	 * phone: apps are always the size of the screen, so this is ignored. */
 }
 
 static void xdg_toplevel_request_maximize(
@@ -814,6 +818,16 @@ static void server_new_xdg_toplevel(struct wl_listener *listener, void *data) {
 	toplevel->xdg_toplevel = xdg_toplevel;
 	toplevel->scene_tree =
 		wlr_scene_xdg_surface_create(&toplevel->server->scene->tree, xdg_toplevel->base);
+
+	/* the border: a rectangle inside the window's node, so it moves with it.
+	 * silver = dom0. 0x0 for now, xdg_toplevel_commit gives it the real size */
+	float silver[4] = {0.76f, 0.79f, 0.84f, 1.0f};
+	toplevel->border = wlr_scene_rect_create(toplevel->scene_tree, 0, 0, silver);
+
+	/* behind the window, sticking out 2 pixels on each side */
+	wlr_scene_node_lower_to_bottom(&toplevel->border->node);
+	wlr_scene_node_set_position(&toplevel->border->node, -2, -2);
+
 	toplevel->scene_tree->node.data = toplevel;
 	xdg_toplevel->base->data = toplevel->scene_tree;
 
@@ -885,6 +899,25 @@ static void server_new_xdg_popup(struct wl_listener *listener, void *data) {
 
 	popup->destroy.notify = xdg_popup_destroy;
 	wl_signal_add(&xdg_popup->events.destroy, &popup->destroy);
+}
+
+static void decoration_destroy(struct wl_listener *listener, void *data) {
+	/* the app's decoration object is going away, forget it */
+	struct tinywl_toplevel *toplevel = wl_container_of(listener, toplevel, decoration_destroy);
+	wl_list_remove(&toplevel->decoration_destroy.link);
+	toplevel->decoration = NULL;
+}
+
+static void server_new_decoration(struct wl_listener *listener, void *data) {
+	/* an app asked about decorations. find its toplevel and remember the
+	 * decoration, xdg_toplevel_commit answers it on the first commit */
+	struct wlr_xdg_toplevel_decoration_v1 *decoration = data;
+	struct wlr_scene_tree *tree = decoration->toplevel->base->data;
+	struct tinywl_toplevel *toplevel = tree->node.data;
+
+	toplevel->decoration = decoration;
+	toplevel->decoration_destroy.notify = decoration_destroy;
+	wl_signal_add(&decoration->events.destroy, &toplevel->decoration_destroy);
 }
 
 int main(int argc, char *argv[]) {
@@ -973,6 +1006,11 @@ int main(int argc, char *argv[]) {
 	 */
 	server.scene = wlr_scene_create();
 	server.scene_layout = wlr_scene_attach_output_layout(server.scene, server.output_layout);
+
+	/* xdg-decoration: apps ask who draws title bars. see server_new_decoration */
+	server.decoration_manager = wlr_xdg_decoration_manager_v1_create(server.wl_display);
+	server.new_decoration.notify = server_new_decoration;
+	wl_signal_add(&server.decoration_manager->events.new_toplevel_decoration, &server.new_decoration);
 
 	/* Set up xdg-shell version 3. The xdg-shell is a Wayland protocol which is
 	 * used for application windows. For more detail on shells, refer to
