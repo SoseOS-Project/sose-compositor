@@ -80,11 +80,6 @@ static void xdg_toplevel_unmap(struct wl_listener *listener, void *data) {
 	/* Called when the surface is unmapped, and should no longer be shown. */
 	struct sose_toplevel *toplevel = wl_container_of(listener, toplevel, unmap);
 
-	/* Reset the cursor mode if the grabbed toplevel was unmapped. */
-	if (toplevel == toplevel->server->grabbed_toplevel) {
-		reset_cursor_mode(toplevel->server);
-	}
-
 	struct sose_server *server = toplevel->server;
 
 	/* close animation, unless it was already off screen at home */

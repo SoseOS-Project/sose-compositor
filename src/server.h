@@ -33,11 +33,6 @@
 #include <xkbcommon/xkbcommon.h>
 
 /* For brevity's sake, struct members are annotated where they are used. */
-enum sose_cursor_mode {
-	SOSE_CURSOR_PASSTHROUGH,
-	SOSE_CURSOR_MOVE,
-	SOSE_CURSOR_RESIZE,
-};
 
 struct sose_server {
 	struct wl_display *wl_display;
@@ -83,11 +78,6 @@ struct sose_server {
 	struct wl_listener pointer_focus_change;
 	struct wl_listener request_set_selection;
 	struct wl_list keyboards;
-	enum sose_cursor_mode cursor_mode;
-	struct sose_toplevel *grabbed_toplevel;
-	double grab_x, grab_y;
-	struct wlr_box grab_geobox;
-	uint32_t resize_edges;
 
 	struct wlr_output_layout *output_layout;
 	struct wl_list outputs;
@@ -200,7 +190,6 @@ void server_new_input(struct wl_listener *listener, void *data);
 void seat_request_cursor(struct wl_listener *listener, void *data);
 void seat_pointer_focus_change(struct wl_listener *listener, void *data);
 void seat_request_set_selection(struct wl_listener *listener, void *data);
-void reset_cursor_mode(struct sose_server *server);
 void server_cursor_motion(struct wl_listener *listener, void *data);
 void server_cursor_motion_absolute(struct wl_listener *listener, void *data);
 void server_cursor_button(struct wl_listener *listener, void *data);

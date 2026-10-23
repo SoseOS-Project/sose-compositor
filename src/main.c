@@ -140,7 +140,6 @@ int main(int argc, char *argv[]) {
 	 *
 	 * And more comments are sprinkled throughout the notify functions above.
 	 */
-	server.cursor_mode = SOSE_CURSOR_PASSTHROUGH;
 	server.cursor_motion.notify = server_cursor_motion;
 	wl_signal_add(&server.cursor->events.motion, &server.cursor_motion);
 	server.cursor_motion_absolute.notify = server_cursor_motion_absolute;
